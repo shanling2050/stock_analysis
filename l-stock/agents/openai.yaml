@@ -1,0 +1,4 @@
+interface:
+  display_name: "l-stock"
+  short_description: "A股持仓与关注池每日诊断报告"
+  default_prompt: "初始化或运行 l-stock，读取我的持仓和关注列表，抓取 A 股资金、情绪、板块和个股数据，生成可执行交易报告。"
