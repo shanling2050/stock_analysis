@@ -165,6 +165,8 @@ button, a { font: inherit; }
 .chip-position { background: #eff6ff; color: var(--blue); }
 .chip-watch { background: #f1f5f9; color: #475569; }
 .chip-risk { background: #fef2f2; color: var(--red); }
+.chip-buy { background: #f0fdf4; color: var(--green); }
+.chip-profit { background: #eff6ff; color: var(--blue); }
 .chip-action { background: #fff7ed; color: var(--amber); }
 .today-script { border-top: 4px solid var(--accent); }
 .script-hero {
@@ -255,7 +257,7 @@ button, a { font: inherit; }
 }
 .matrix-wrap table {
   width: 100%;
-  min-width: 760px;
+  min-width: 1100px;
   border-collapse: collapse;
   background: #fff;
   font-size: 13px;
@@ -811,6 +813,26 @@ def position_action(item: dict[str, Any]) -> dict[str, str]:
             "action": "减仓",
             "text": f"{stock}：收盘跌破 MA20，先减仓；若 1-2 日不能快速收回 MA20，继续降风险，严禁补仓。",
         }
+    
+    cost = _as_float(item.get("cost"))
+    if close is not None and cost is not None and cost > 0:
+        profit_pct = (close - cost) / cost * 100
+        if profit_pct >= 30:
+            return {
+                "bucket": "条件执行",
+                "stock": stock,
+                "action": "止盈",
+                "text": f"{stock}：当前盈利 {profit_pct:.1f}%，已偏离成本30%以上，建议减仓1/3止盈。",
+            }
+    
+    if close is not None and ma20 is not None and ma40 is not None:
+        if close >= ma20 and close >= ma40 and ma20 >= ma40:
+            return {
+                "bucket": "条件执行",
+                "stock": stock,
+                "action": "加仓",
+                "text": f"{stock}：股价站上MA20/MA40，均线多头排列，可考虑加仓机会。",
+            }
 
     return {
         "bucket": "观察等待",
@@ -1665,19 +1687,52 @@ def _trend_status_text(item: dict[str, Any]) -> str:
     close = _close_value(item)
     ma20 = _indicator_value(item, "ma20")
     ma40 = _indicator_value(item, "ma40")
+    cost = _as_float(item.get("cost"))
     if close is None:
         return "缺少最新收盘价，当前结构只能按数据不足处理。"
     if ma20 is None or ma40 is None:
         return f"现价 {_format_number(close)}，但 MA20/MA40 不完整，趋势判断降级为观察。"
+    
+    result = []
     if close >= ma20 and close >= ma40:
         if ma20 >= ma40:
-            return f"现价 {_format_number(close)} 位于 MA20 {_format_number(ma20)} 和 MA40 {_format_number(ma40)} 上方，短中期结构偏强。"
-        return f"现价 {_format_number(close)} 已站上 MA20 {_format_number(ma20)} 和 MA40 {_format_number(ma40)}，但 MA20 仍低于 MA40，属于反弹修复，需看回踩确认。"
-    if close >= ma20 and close < ma40:
-        return f"现价 {_format_number(close)} 站上 MA20 {_format_number(ma20)}，但仍低于 MA40 {_format_number(ma40)}，属于修复未完成。"
-    if close < ma20 and close >= ma40:
-        return f"现价 {_format_number(close)} 跌破 MA20 {_format_number(ma20)}，但仍在 MA40 {_format_number(ma40)} 上方，进入回踩观察。"
-    return f"现价 {_format_number(close)} 跌破 MA40 {_format_number(ma40)}，趋势纪律转弱。"
+            result.append(f"现价 {_format_number(close)} 位于 MA20 {_format_number(ma20)} 和 MA40 {_format_number(ma40)} 上方，短中期结构偏强。")
+        else:
+            result.append(f"现价 {_format_number(close)} 已站上 MA20 {_format_number(ma20)} 和 MA40 {_format_number(ma40)}，但 MA20 仍低于 MA40，属于反弹修复，需看回踩确认。")
+    elif close >= ma20 and close < ma40:
+        result.append(f"现价 {_format_number(close)} 站上 MA20 {_format_number(ma20)}，但仍低于 MA40 {_format_number(ma40)}，属于修复未完成。")
+    elif close < ma20 and close >= ma40:
+        result.append(f"现价 {_format_number(close)} 跌破 MA20 {_format_number(ma20)}，但仍在 MA40 {_format_number(ma40)} 上方，进入回踩观察。")
+    else:
+        result.append(f"现价 {_format_number(close)} 跌破 MA40 {_format_number(ma40)}，趋势纪律转弱。")
+    
+    if cost is not None and close is not None and cost > 0:
+        loss_pct = (cost - close) / cost * 100
+        if loss_pct >= 30:
+            result.append(f"止损触发2：当前亏损 {loss_pct:.1f}%，已低于成本30%，需再减仓40%。")
+        elif loss_pct >= 20:
+            result.append(f"止损触发2：当前亏损 {loss_pct:.1f}%，已低于成本20%，需再减仓30%。")
+        elif loss_pct >= 15:
+            result.append(f"止损触发2：当前亏损 {loss_pct:.1f}%，已低于成本15%，需减仓30%。")
+        elif loss_pct > 0:
+            result.append(f"止损触发2：当前亏损 {loss_pct:.1f}%，未触发减仓线，继续观察。")
+        else:
+            profit_pct = (close - cost) / cost * 100
+            result.append(f"止盈触发：当前盈利 {profit_pct:.1f}%，注意偏离20周线25-30%以上减1/3。")
+    
+    ma20_trend = "抬头" if ma20 is not None and close is not None and close >= ma20 else "向下"
+    ma40_trend = "抬头" if ma40 is not None and close is not None and close >= ma40 else "向下"
+    if close is not None and ma20 is not None and ma40 is not None:
+        if close >= ma20 and close >= ma40 and ma20 >= ma40:
+            result.append(f"右侧加仓触发：股价站上MA20/MA40，均线多头排列，可考虑第二仓或第三仓加仓机会。")
+        elif close >= ma20 and close < ma40:
+            result.append(f"右侧加仓触发：股价站上MA20但未破MA40，属于第一仓建仓或加仓观察区。")
+        elif close < ma20 and close >= ma40:
+            result.append(f"右侧加仓触发：股价回踩MA20，若缩量止跌可考虑第二仓加仓机会。")
+        else:
+            result.append(f"右侧加仓触发：股价跌破MA40，趋势转弱，暂不加仓。")
+    
+    return "；".join(result)
 
 
 def _level_one_line(level: dict[str, Any]) -> str:
@@ -2337,6 +2392,10 @@ def _action_chip_class(action_name: str) -> str:
         return "chip chip-watch"
     if action_name == "持有":
         return "chip chip-position"
+    if action_name == "加仓":
+        return "chip chip-buy"
+    if action_name == "止盈":
+        return "chip chip-profit"
     return "chip chip-action"
 
 
@@ -2347,16 +2406,36 @@ def _action_matrix_row_html(action: dict[str, str], identity: str, item: Optiona
     technical_status = _trend_status_text(item) if isinstance(item, dict) else ACTION_DISPLAY_NAMES.get(
         action.get("bucket", ""), action.get("bucket", "观察等待")
     )
+    technical_status_lines = technical_status.split("；")
+    technical_status_html = "<br>".join(_html(line.strip()) for line in technical_status_lines if line.strip())
     trigger = action.get("trigger")
     if not trigger:
         trigger = "跌破 MA20 减仓；跌破 MA40 退出" if identity == "持仓" else "支撑/压力/均线"
+    
+    add_position_trigger = ""
+    if isinstance(item, dict):
+        close = _close_value(item)
+        ma20 = _indicator_value(item, "ma20")
+        ma40 = _indicator_value(item, "ma40")
+        if close is not None and ma20 is not None and ma40 is not None:
+            if close >= ma20 and close >= ma40 and ma20 >= ma40:
+                add_position_trigger = "站上MA20/MA40，均线多头，可考虑第二仓或第三仓"
+            elif close >= ma20 and close < ma40:
+                add_position_trigger = "站上MA20未破MA40，第一仓建仓或加仓观察区"
+            elif close < ma20 and close >= ma40:
+                add_position_trigger = "回踩MA20，若缩量止跌可考虑第二仓"
+            else:
+                add_position_trigger = "跌破MA40，趋势转弱，暂不加仓"
     return (
         "<tr>"
         f"<td>{_html(stock)}</td>"
         f'<td><span class="chip {identity_class}">{_html(identity)}</span></td>'
         f'<td><span class="{_action_chip_class(action_name)}">{_html(action_name)}</span></td>'
-        f"<td>{_html(technical_status)}</td>"
+        f"<td>{technical_status_html}</td>"
         f"<td>{_html(trigger)}</td>"
+        f"<td>低于成本15%减30%；低于20%再减30%；低于30%再减40%</td>"
+        f"<td>偏离20周线25-30%以上减1/3；偏离60周线40%以上再减1/3；有效跌破20周线撤退</td>"
+        f"<td>{_html(add_position_trigger)}</td>"
         f"<td>{_html(action.get('text', '观察等待。'))}</td>"
         "</tr>"
     )
@@ -2374,12 +2453,12 @@ def _action_matrix_html(
     for item in watch_items:
         rows.append(_action_matrix_row_html(_watchlist_web_action(item), "关注池", item))
     if not rows:
-        rows.append('<tr><td colspan="6" class="empty-cell">暂无需要展示的股票动作。</td></tr>')
+        rows.append('<tr><td colspan="9" class="empty-cell">暂无需要展示的股票动作。</td></tr>')
     body = (
         _section_heading_html("行动矩阵", "今天盯什么")
         + '<div class="matrix-wrap">'
         + "<table>"
-        + "<thead><tr><th>股票</th><th>身份</th><th>动作</th><th>技术状态</th><th>触发 / 失效</th><th>今天怎么做</th></tr></thead>"
+        + "<thead><tr><th>股票</th><th>身份</th><th>动作</th><th>技术状态</th><th>触发 / 失效</th><th>止损触发2</th><th>止盈触发</th><th>右侧交易加仓触发</th><th>今天怎么做</th></tr></thead>"
         + f"<tbody>{''.join(rows)}</tbody>"
         + "</table></div>"
     )
@@ -2636,6 +2715,36 @@ def _stock_card_html(
     trend_text = _trend_status_text(item)
     level_table = _price_level_table_html(item, include_trade_plan_levels=identity == "position")
     action_text = action.get("text", "观察等待。")
+    
+    close = _close_value(item)
+    cost = _as_float(item.get("cost"))
+    profit_loss_text = ""
+    if cost is not None and close is not None and cost > 0:
+        loss_pct = (cost - close) / cost * 100
+        if loss_pct >= 30:
+            profit_loss_text = f"止损触发2：当前亏损 {loss_pct:.1f}%，已低于成本30%，需再减仓40%。"
+        elif loss_pct >= 20:
+            profit_loss_text = f"止损触发2：当前亏损 {loss_pct:.1f}%，已低于成本20%，需再减仓30%。"
+        elif loss_pct >= 15:
+            profit_loss_text = f"止损触发2：当前亏损 {loss_pct:.1f}%，已低于成本15%，需减仓30%。"
+        elif loss_pct > 0:
+            profit_loss_text = f"止损触发2：当前亏损 {loss_pct:.1f}%，未触发减仓线，继续观察。"
+        else:
+            profit_pct = (close - cost) / cost * 100
+            profit_loss_text = f"止盈触发：当前盈利 {profit_pct:.1f}%，偏离20周线25-30%以上减1/3；偏离60周线40%以上再减1/3；有效跌破20周线撤退。"
+    
+    ma20 = _indicator_value(item, "ma20")
+    ma40 = _indicator_value(item, "ma40")
+    add_position_text = ""
+    if close is not None and ma20 is not None and ma40 is not None:
+        if close >= ma20 and close >= ma40 and ma20 >= ma40:
+            add_position_text = "右侧加仓触发：股价站上MA20/MA40，均线多头排列，可考虑第二仓或第三仓加仓机会。"
+        elif close >= ma20 and close < ma40:
+            add_position_text = "右侧加仓触发：股价站上MA20但未破MA40，属于第一仓建仓或加仓观察区。"
+        elif close < ma20 and close >= ma40:
+            add_position_text = "右侧加仓触发：股价回踩MA20，若缩量止跌可考虑第二仓加仓机会。"
+        else:
+            add_position_text = "右侧加仓触发：股价跌破MA40，趋势转弱，暂不加仓。"
     playbook_text = (
         _position_playbook(item, action)
         if identity == "position"
@@ -2674,6 +2783,8 @@ def _stock_card_html(
         f'<div class="compact-detail compact-primary"><div class="detail-label">核心判断</div><div class="detail-value">{_html(trend_text)}</div></div>'
         f'<div class="compact-detail"><div class="detail-label">动作条件</div>{_condition_items_html(item, action, identity)}</div>'
         f'<div class="compact-detail"><div class="detail-label">价位表</div>{level_table}</div>'
+        f'<div class="compact-detail"><div class="detail-label">止损/止盈</div><div class="detail-value">{_html(profit_loss_text)}</div></div>'
+        f'<div class="compact-detail"><div class="detail-label">右侧加仓</div><div class="detail-value">{_html(add_position_text)}</div></div>'
         f'<div class="compact-detail"><div class="detail-label">当下动作</div><div class="detail-value">{_html(action_text)}</div></div>'
         f"{_playbook_details_html(playbook_text)}"
         "</aside>"
