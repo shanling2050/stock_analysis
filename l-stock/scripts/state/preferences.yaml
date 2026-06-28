@@ -1,0 +1,15 @@
+{
+  "risk": {
+    "reserve_cash_ratio": 0.2,
+    "max_loss_per_trade_ratio": 0.02,
+    "minimum_odds_ratio": 2.0
+  },
+  "report": {
+    "language": "zh-CN",
+    "first_page_action_only": true
+  },
+  "data": {
+    "allow_stale_margin_data": true,
+    "default_market": "A-share"
+  }
+}

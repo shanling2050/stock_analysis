@@ -1,0 +1,17 @@
+{
+  "positions": [
+    {"code": "603986", "name": "兆易创新", "market": "sh", "quantity": 500, "cost": 382.769},
+    {"code": "600176", "name": "中国巨石", "market": "sh", "quantity": 1800, "cost": 53.479},
+    {"code": "688981", "name": "中芯国际", "market": "sh", "quantity": 807, "cost": 123.052},
+    {"code": "688008", "name": "澜起科技", "market": "sh", "quantity": 604, "cost": 242.570},
+    {"code": "688012", "name": "中微公司", "market": "sh", "quantity": 800, "cost": 285.735},
+    {"code": "300502", "name": "新易盛", "market": "sz", "quantity": 560, "cost": 441.293},
+    {"code": "300373", "name": "扬杰科技", "market": "sz", "quantity": 1100, "cost": 120.871},
+    {"code": "159558", "name": "半导体E", "market": "sz", "quantity": 51900, "cost": 3.257},
+    {"code": "159995", "name": "芯片ETF", "market": "sz", "quantity": 32000, "cost": 2.437},
+    {"code": "159781", "name": "科创创业", "market": "sz", "quantity": 7800, "cost": 1.269},
+    {"code": "515880", "name": "通信ETF", "market": "sh", "quantity": 35500, "cost": 1.502},
+    {"code": "513880", "name": "日经ETF", "market": "sh", "quantity": 64700, "cost": 2.516},
+    {"code": "159509", "name": "纳指科技", "market": "sz", "quantity": 5300, "cost": 2.760}
+  ]
+}

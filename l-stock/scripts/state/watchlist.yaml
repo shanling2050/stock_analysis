@@ -1,0 +1,59 @@
+{
+  "watchlist": [
+    {
+      "code": "601899",
+      "name": "紫金矿业",
+      "market": "sh"
+    },
+    {
+      "code": "603993",
+      "name": "洛阳钼业",
+      "market": "sh"
+    },
+    {
+      "code": "000792",
+      "name": "盐湖股份",
+      "market": "sz"
+    },
+    {
+      "code": "000408",
+      "name": "藏格矿业",
+      "market": "sz"
+    },
+    {
+      "code": "601336",
+      "name": "新华保险",
+      "market": "sh"
+    },
+    {
+      "code": "600276",
+      "name": "恒瑞医药",
+      "market": "sh"
+    },
+    {
+      "code": "600900",
+      "name": "长江电力",
+      "market": "sh"
+    },
+    {
+      "code": "601088",
+      "name": "中国神华",
+      "market": "sh"
+    },
+    {
+      "code": "600096",
+      "name": "云天化",
+      "market": "sh"
+    },
+    {
+      "code": "000807",
+      "name": "云铝股份",
+      "market": "sz"
+    },
+    {
+      "code": "601225",
+      "name": "陕西煤业",
+      "market": "sh"
+    }
+  ]
+}

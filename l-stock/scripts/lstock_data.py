@@ -20,6 +20,8 @@ REQUIRED_STATE_FILES = ["positions.yaml", "watchlist.yaml", "preferences.yaml", 
 MA_WINDOWS = (5, 10, 20, 40, 60)
 EASTMONEY_KLINE_SOURCE = "eastmoney_kline"
 SINA_KLINE_SOURCE = "sina_kline"
+TENCENT_KLINE_SOURCE = "tencent_kline"
+TENCENT_HK_KLINE_SOURCE = "tencent_hk_kline"
 VALID_GROUP_STATUSES = {"PASS", "WARN", "BLOCK"}
 SOURCE_OVERRIDE_PATH = "cache/run_logs/source-overrides.json"
 MARKET_SECURITIES = [
@@ -38,8 +40,8 @@ CHROME_OVERRIDE_DETAILS: dict[str, dict[str, Any]] = {
             "items[].code",
             "items[].name",
             "items[].close",
-            "items[].ma20",
-            "items[].ma40",
+            "items[].ma10",
+            "items[].ma30",
         ],
         "example_override": {
             "status": "PASS",
@@ -49,26 +51,26 @@ CHROME_OVERRIDE_DETAILS: dict[str, dict[str, Any]] = {
                     "code": "000300",
                     "name": "沪深300",
                     "close": 3810.5,
-                    "ma20": 3760.2,
-                    "ma40": 3688.4,
+                    "ma10": 3760.2,
+                    "ma30": 3688.4,
                 },
                 {
                     "code": "000905",
                     "name": "中证500",
                     "close": 5680.3,
-                    "ma20": 5620.1,
-                    "ma40": 5510.7,
+                    "ma10": 5620.1,
+                    "ma30": 5510.7,
                 },
                 {
                     "code": "399006",
                     "name": "创业板指",
                     "close": 2050.2,
-                    "ma20": 2018.5,
-                    "ma40": 1988.6,
+                    "ma10": 2018.5,
+                    "ma30": 1988.6,
                 }
             ],
         },
-        "success_criteria": "确认指数代码、名称、收盘价、MA20、MA40 来自最新行情/K线页面后，写入 PASS 覆盖。",
+        "success_criteria": "确认指数代码、名称、收盘价、MA10、MA30 来自最新行情/K线页面后，写入 PASS 覆盖。",
     },
     "stocks": {
         "required_fields": [
@@ -77,8 +79,8 @@ CHROME_OVERRIDE_DETAILS: dict[str, dict[str, Any]] = {
             "items[].code",
             "items[].name",
             "items[].close",
-            "items[].ma20",
-            "items[].ma40",
+            "items[].ma10",
+            "items[].ma30",
         ],
         "example_override": {
             "status": "PASS",
@@ -183,10 +185,11 @@ def now_iso() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
 
 
-def calc_ma(closes: list[Any]) -> dict[str, float]:
+def calc_ma(closes: list[Any], windows: Optional[tuple[int, ...]] = None) -> dict[str, float]:
     values = [float(value) for value in closes]
     result: dict[str, float] = {}
-    for window in MA_WINDOWS:
+    ma_windows = windows if windows is not None else MA_WINDOWS
+    for window in ma_windows:
         if len(values) >= window:
             result[f"ma{window}"] = round(statistics.mean(values[-window:]), 4)
     return result
@@ -199,6 +202,8 @@ def eastmoney_secid(code: str) -> str:
             return str(item["secid"])
     if normalized.startswith(("5", "6", "9")):
         return f"1.{normalized}"
+    if normalized.startswith("00") and len(normalized) == 6:
+        return f"116.{normalized[2:]}"
     return f"0.{normalized}"
 
 
@@ -307,6 +312,148 @@ def fetch_sina_kline(code: str, days: int = 120, *, fallback_from: Optional[dict
         "source": SINA_KLINE_SOURCE,
         "fetched_at": now_iso(),
         "rows": rows,
+        "close": closes[-1] if closes else None,
+        "indicators": calc_ma(closes),
+    }
+    if fallback_from is not None:
+        result["fallback_from"] = fallback_from
+    if status == "BLOCK":
+        result["reason"] = "insufficient_rows"
+        result["missing"] = ["kline_rows>=40"]
+    return result
+
+
+def _tencent_symbol(code: str) -> str:
+    normalized = str(code).strip()
+    if normalized in {"000300", "000905"}:
+        return f"sh{normalized}"
+    if normalized == "399006":
+        return f"sz{normalized}"
+    return ("sh" if normalized.startswith(("5", "6", "9")) else "sz") + normalized
+
+
+def _is_hk_code(code: str) -> bool:
+    normalized = str(code).strip()
+    if len(normalized) == 5 and normalized.startswith("00"):
+        return True
+    if len(normalized) == 6 and normalized.startswith("00"):
+        return normalized in KNOWN_HK_STOCK_CONNECT_CODES
+    return False
+
+
+KNOWN_HK_CODES = {"00700", "09988", "09999", "09698", "06198", "06098", "06998", "06888", "02382", "02196", "01179", "01359", "01579", "06969"}
+
+KNOWN_HK_STOCK_CONNECT_CODES = {"003441", "001888", "00169", "03333", "06699", "06837", "06030", "06198", "06969", "09698"}
+
+
+def _is_known_hk_code(code: str) -> bool:
+    normalized = str(code).strip()
+    return normalized in KNOWN_HK_CODES
+
+
+def _tencent_hk_symbol(code: str) -> str:
+    normalized = str(code).strip()
+    return f"hk{normalized.zfill(5)}"
+
+
+def parse_tencent_rows(data: list[list[str]], days: int) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    for item in data[-days:]:
+        if not isinstance(item, list) or len(item) < 6:
+            continue
+        try:
+            rows.append(
+                {
+                    "date": str(item[0]),
+                    "open": float(item[1]),
+                    "close": float(item[2]),
+                    "high": float(item[3]),
+                    "low": float(item[4]),
+                    "volume": float(item[5]),
+                    "amount": float(item[5]) if len(item) > 5 else 0.0,
+                }
+            )
+        except (ValueError, TypeError):
+            continue
+    return rows
+
+
+def fetch_tencent_kline(code: str, days: int = 120, *, fallback_from: Optional[dict[str, Any]] = None) -> dict[str, Any]:
+    normalized = str(code).strip()
+    symbol = _tencent_symbol(normalized)
+    url = (
+        f"https://web.ifzq.gtimg.cn/appstock/app/fqkline/get"
+        f"?_var=kline_dayqfq&param={symbol},day,2026-01-01,2026-12-31,{days},qfq"
+    )
+    request = urllib.request.Request(url, headers=_request_headers("https://finance.qq.com/"))
+    try:
+        with urllib.request.urlopen(request, timeout=15) as response:
+            text = response.read().decode("utf-8", errors="replace")
+            match = re.search(r"=\s*(\{.*\})", text)
+            if not match:
+                raise ValueError("missing Tencent JSON payload")
+            payload = json.loads(match.group(1))
+            data = payload.get("data", {})
+            stock_data = data.get(symbol, {})
+            qfqday = stock_data.get("qfqday", stock_data.get("day", []))
+            rows = parse_tencent_rows(qfqday, days)
+    except (OSError, urllib.error.URLError, json.JSONDecodeError, KeyError, ValueError, TypeError) as error:
+        payload = kline_block(normalized, [], "tencent_fetch_error", fallback_from=fallback_from, error=str(error))
+        payload["source"] = TENCENT_KLINE_SOURCE
+        return payload
+
+    closes = [row["close"] for row in rows]
+    status = "PASS" if len(rows) >= 40 else "BLOCK"
+    result: dict[str, Any] = {
+        "code": normalized,
+        "status": status,
+        "source": TENCENT_KLINE_SOURCE,
+        "fetched_at": now_iso(),
+        "rows": rows,
+        "close": closes[-1] if closes else None,
+        "indicators": calc_ma(closes),
+    }
+    if fallback_from is not None:
+        result["fallback_from"] = fallback_from
+    if status == "BLOCK":
+        result["reason"] = "insufficient_rows"
+        result["missing"] = ["kline_rows>=40"]
+    return result
+
+
+def fetch_tencent_hk_kline(code: str, days: int = 120, *, fallback_from: Optional[dict[str, Any]] = None) -> dict[str, Any]:
+    normalized = str(code).strip()
+    symbol = _tencent_hk_symbol(normalized)
+    url = (
+        f"https://web.ifzq.gtimg.cn/appstock/app/fqkline/get"
+        f"?_var=kline_dayqfq&param={symbol},day,,,{days},qfq"
+    )
+    request = urllib.request.Request(url, headers=_request_headers("https://finance.qq.com/"))
+    try:
+        with urllib.request.urlopen(request, timeout=15) as response:
+            text = response.read().decode("utf-8", errors="replace")
+            match = re.search(r"=\s*(\{.*\})", text)
+            if not match:
+                raise ValueError("missing Tencent HK JSON payload")
+            payload = json.loads(match.group(1))
+            data = payload.get("data", {})
+            stock_data = data.get(symbol, {})
+            qfqday = stock_data.get("qfqday", stock_data.get("day", []))
+            rows = parse_tencent_rows(qfqday, days)
+    except (OSError, urllib.error.URLError, json.JSONDecodeError, KeyError, ValueError, TypeError) as error:
+        payload = kline_block(normalized, [], "tencent_hk_fetch_error", fallback_from=fallback_from, error=str(error))
+        payload["source"] = TENCENT_HK_KLINE_SOURCE
+        return payload
+
+    closes = [row["close"] for row in rows]
+    status = "PASS" if len(rows) >= 40 else "BLOCK"
+    result: dict[str, Any] = {
+        "code": normalized,
+        "status": status,
+        "source": TENCENT_HK_KLINE_SOURCE,
+        "fetched_at": now_iso(),
+        "rows": rows,
+        "close": closes[-1] if closes else None,
         "indicators": calc_ma(closes),
     }
     if fallback_from is not None:
@@ -319,6 +466,10 @@ def fetch_sina_kline(code: str, days: int = 120, *, fallback_from: Optional[dict
 
 def fetch_eastmoney_kline(code: str, days: int = 120, secid: Optional[str] = None) -> dict[str, Any]:
     normalized = str(code).strip()
+
+    if _is_hk_code(normalized) or _is_known_hk_code(normalized):
+        return fetch_tencent_hk_kline(normalized, days)
+
     params = {
         "secid": secid or eastmoney_secid(normalized),
         "fields1": "f1,f2,f3,f4,f5,f6",
@@ -336,23 +487,23 @@ def fetch_eastmoney_kline(code: str, days: int = 120, secid: Optional[str] = Non
             payload = json.loads(response.read().decode("utf-8"))
     except (OSError, urllib.error.URLError, json.JSONDecodeError) as error:
         fallback_from = kline_block(normalized, [], "fetch_error", error=str(error))
-        return fetch_sina_kline(normalized, days, fallback_from=fallback_from)
+        return fetch_tencent_kline(normalized, days, fallback_from=fallback_from)
 
     data = payload.get("data")
     if not isinstance(data, dict):
         fallback_from = kline_block(normalized, [], "missing_data")
-        return fetch_sina_kline(normalized, days, fallback_from=fallback_from)
+        return fetch_tencent_kline(normalized, days, fallback_from=fallback_from)
 
     klines = data.get("klines")
     if not isinstance(klines, list):
         fallback_from = kline_block(normalized, [], "missing_klines")
-        return fetch_sina_kline(normalized, days, fallback_from=fallback_from)
+        return fetch_tencent_kline(normalized, days, fallback_from=fallback_from)
 
     try:
         rows = parse_eastmoney_rows(klines, days)
     except (ValueError, TypeError) as error:
         fallback_from = kline_block(normalized, [], "parse_error", error=str(error))
-        return fetch_sina_kline(normalized, days, fallback_from=fallback_from)
+        return fetch_tencent_kline(normalized, days, fallback_from=fallback_from)
 
     closes = [row["close"] for row in rows]
     status = "PASS" if len(rows) >= 40 else "BLOCK"
@@ -362,14 +513,103 @@ def fetch_eastmoney_kline(code: str, days: int = 120, secid: Optional[str] = Non
         "source": EASTMONEY_KLINE_SOURCE,
         "fetched_at": now_iso(),
         "rows": rows,
+        "close": closes[-1] if closes else None,
         "indicators": calc_ma(closes),
     }
     if status == "BLOCK":
-        fallback = fetch_sina_kline(normalized, days, fallback_from=result)
+        fallback = fetch_tencent_kline(normalized, days, fallback_from=result)
         if fallback.get("status") == "PASS":
             return fallback
+        fallback2 = fetch_sina_kline(normalized, days, fallback_from=fallback)
+        if fallback2.get("status") == "PASS":
+            return fallback2
         result["reason"] = "insufficient_rows"
         result["missing"] = ["kline_rows>=40"]
+    return result
+
+
+def fetch_weekly_kline(code: str, weeks: int = 60) -> dict[str, Any]:
+    normalized = str(code).strip()
+    if _is_hk_code(normalized) or _is_known_hk_code(normalized):
+        return fetch_tencent_hk_weekly_kline(normalized, weeks)
+    params = {
+        "secid": eastmoney_secid(normalized),
+        "fields1": "f1,f2,f3,f4,f5,f6",
+        "fields2": "f51,f52,f53,f54,f55,f56,f57,f58,f59,f60,f61",
+        "klt": "102",
+        "fqt": "1",
+        "beg": "20200101",
+        "end": "20500101",
+    }
+    url = "https://push2his.eastmoney.com/api/qt/stock/kline/get?" + urllib.parse.urlencode(params)
+    request = urllib.request.Request(url, headers=_request_headers())
+    try:
+        with urllib.request.urlopen(request, timeout=15) as response:
+            payload = json.loads(response.read().decode("utf-8"))
+    except (OSError, urllib.error.URLError, json.JSONDecodeError) as error:
+        return kline_block(normalized, [], "weekly_fetch_error", error=str(error))
+    data = payload.get("data")
+    if not isinstance(data, dict):
+        return kline_block(normalized, [], "weekly_missing_data")
+    klines = data.get("klines")
+    if not isinstance(klines, list):
+        return kline_block(normalized, [], "weekly_missing_klines")
+    try:
+        rows = parse_eastmoney_rows(klines, weeks)
+    except (ValueError, TypeError) as error:
+        return kline_block(normalized, [], "weekly_parse_error", error=str(error))
+    closes = [row["close"] for row in rows]
+    status = "PASS" if len(rows) >= 30 else "BLOCK"
+    result: dict[str, Any] = {
+        "code": normalized,
+        "status": status,
+        "source": "eastmoney_weekly",
+        "fetched_at": now_iso(),
+        "rows": rows,
+        "close": closes[-1] if closes else None,
+        "indicators": calc_ma(closes, windows=(5, 10, 20, 40)),
+    }
+    if status == "BLOCK":
+        result["reason"] = "insufficient_weekly_rows"
+        result["missing"] = ["weekly_rows>=30"]
+    return result
+
+
+def fetch_tencent_hk_weekly_kline(code: str, weeks: int = 60) -> dict[str, Any]:
+    normalized = str(code).strip()
+    symbol = _tencent_hk_symbol(normalized)
+    url = (
+        f"https://web.ifzq.gtimg.cn/appstock/app/fqkline/get"
+        f"?_var=kline_weekqfq&param={symbol},week,,,{weeks},qfq"
+    )
+    request = urllib.request.Request(url, headers=_request_headers("https://finance.qq.com/"))
+    try:
+        with urllib.request.urlopen(request, timeout=15) as response:
+            text = response.read().decode("utf-8", errors="replace")
+            match = re.search(r"=\s*(\{.*\})", text)
+            if not match:
+                raise ValueError("missing Tencent HK weekly JSON payload")
+            payload = json.loads(match.group(1))
+            data = payload.get("data", {})
+            stock_data = data.get(symbol, {})
+            qfqweek = stock_data.get("qfqweek", stock_data.get("week", []))
+            rows = parse_tencent_rows(qfqweek, weeks)
+    except (OSError, urllib.error.URLError, json.JSONDecodeError, KeyError, ValueError, TypeError) as error:
+        return kline_block(normalized, [], "tencent_hk_weekly_fetch_error", error=str(error))
+    closes = [row["close"] for row in rows]
+    status = "PASS" if len(rows) >= 30 else "BLOCK"
+    result: dict[str, Any] = {
+        "code": normalized,
+        "status": status,
+        "source": "tencent_hk_weekly",
+        "fetched_at": now_iso(),
+        "rows": rows,
+        "close": closes[-1] if closes else None,
+        "indicators": calc_ma(closes, windows=(5, 10, 20, 40)),
+    }
+    if status == "BLOCK":
+        result["reason"] = "insufficient_weekly_rows"
+        result["missing"] = ["weekly_rows>=30"]
     return result
 
 
@@ -622,6 +862,250 @@ def fetch_sectors_group_python() -> dict[str, Any]:
         payload = blocked_group("python_fetch_failed", ["sector_flow"], [])
         payload["error"] = str(error)
         return payload
+
+
+SECTOR_FLOW_KEYWORDS = ["半导体", "电子", "服务器", "CPO", "PCB", "创新药", "保险", "煤炭", "银行", "有色", "贵金属"]
+SECTOR_FLOW_EXCLUDE = ["军工电子", "军工", "焦煤", "医美服务", "电子纸概念", "电子车牌", "电子后视镜"]
+
+SECTOR_ALIAS_MAP = {
+    "创新药": ["创新药", "生物制品", "化学制药", "医药", "医美"],
+    "保险": ["保险", "保险服务"],
+    "煤炭": ["煤炭", "焦煤"],
+    "银行": ["银行"],
+    "有色": ["有色", "有色金属", "稀土", "铜", "铝", "钼"],
+    "贵金属": ["贵金属", "黄金"],
+    "半导体": ["半导体", "集成电路", "芯片"],
+    "电子": ["电子", "光学光电子", "消费电子"],
+}
+
+INDUSTRY_SECTOR_BK_CODES = {
+    "银行": "BK0475",
+    "保险": "BK0474",
+    "煤炭开采": "BK0481",
+}
+
+
+def _fetch_eastmoney_sectors(fs: str) -> Optional[list[dict[str, Any]]]:
+    params = urllib.parse.urlencode(
+        {
+            "pn": 1,
+            "pz": 200,
+            "po": 1,
+            "np": 1,
+            "fltt": 2,
+            "invt": 2,
+            "fid": "f62",
+            "fs": fs,
+            "fields": "f12,f14,f3,f62,f66",
+        }
+    )
+    urls = [
+        "https://push2.eastmoney.com/api/qt/clist/get?" + params,
+        "http://push2.eastmoney.com/api/qt/clist/get?" + params,
+    ]
+    for url in urls:
+        try:
+            payload = _request_json(url, headers=_request_headers("https://data.eastmoney.com/bkzj/hy.html"))
+            data = payload.get("data")
+            diff = data.get("diff") if isinstance(data, dict) else None
+            if isinstance(diff, list):
+                return diff
+        except Exception:
+            continue
+    return None
+
+
+def _fetch_industry_sector_flow(bk_code: str, sector_name: str) -> Optional[dict[str, Any]]:
+    params = urllib.parse.urlencode(
+        {
+            "pn": 1,
+            "pz": 100,
+            "po": 1,
+            "np": 1,
+            "fltt": 2,
+            "invt": 2,
+            "fid": "f62",
+            "fs": f"b:{bk_code}",
+            "fields": "f12,f14,f3,f62,f66",
+        }
+    )
+    urls = [
+        "https://push2.eastmoney.com/api/qt/clist/get?" + params,
+        "http://push2.eastmoney.com/api/qt/clist/get?" + params,
+    ]
+    
+    for url in urls:
+        try:
+            payload = _request_json(url, headers=_request_headers("https://data.eastmoney.com/bkzj/hy.html"))
+            data = payload.get("data")
+            diff = data.get("diff") if isinstance(data, dict) else None
+            if not isinstance(diff, list) or len(diff) == 0:
+                continue
+            
+            total_main = 0.0
+            total_super_large = 0.0
+            total_change_pct = 0.0
+            count = 0
+            
+            for row in diff:
+                if not isinstance(row, dict):
+                    continue
+                main_val = _as_number(row.get("f62"))
+                super_large_val = _as_number(row.get("f66"))
+                change_pct_val = _as_number(row.get("f3"))
+                
+                if main_val is not None and super_large_val is not None:
+                    total_main += main_val
+                    total_super_large += super_large_val
+                    if change_pct_val is not None:
+                        total_change_pct += change_pct_val
+                        count += 1
+            
+            if count == 0:
+                continue
+            
+            avg_change_pct = total_change_pct / count if count > 0 else 0.0
+            
+            return {
+                "name": sector_name,
+                "change_pct": round(avg_change_pct, 2),
+                "main_net_inflow": _money_text(total_main),
+                "super_large_net_inflow": _money_text(total_super_large),
+            }
+        except Exception:
+            continue
+    
+    return None
+
+
+def fetch_sector_flow_python() -> dict[str, Any]:
+    all_sectors: list[dict[str, Any]] = []
+    fs_options = ["m:90+t:2", "m:90+t:3", "m:90+t:1"]
+    
+    for fs in fs_options:
+        sectors = _fetch_eastmoney_sectors(fs)
+        if sectors:
+            all_sectors.extend(sectors)
+
+    seen_names: set[str] = set()
+    matched_items: list[dict[str, Any]] = []
+    top_items: list[dict[str, Any]] = []
+    
+    for row in all_sectors:
+        if not isinstance(row, dict):
+            continue
+        name = str(row.get("f14") or row.get("name") or "").strip()
+        if not name or name in seen_names:
+            continue
+        seen_names.add(name)
+        
+        change_pct = _as_number(row.get("f3"))
+        main = _money_text(row.get("f62"))
+        super_large = _money_text(row.get("f66"))
+        if change_pct is None or not main or not super_large:
+            continue
+        
+        item = {
+            "name": name,
+            "change_pct": change_pct,
+            "main_net_inflow": main,
+            "super_large_net_inflow": super_large,
+        }
+        
+        if any(exclude in name for exclude in SECTOR_FLOW_EXCLUDE):
+            continue
+        
+        matched = False
+        for keyword in SECTOR_FLOW_KEYWORDS:
+            aliases = SECTOR_ALIAS_MAP.get(keyword, [keyword])
+            if any(alias in name for alias in aliases):
+                matched_items.append(item)
+                matched = True
+                break
+        
+        if not matched and len(top_items) < 10:
+            top_items.append(item)
+
+    for sector_name, bk_code in INDUSTRY_SECTOR_BK_CODES.items():
+        if sector_name in seen_names:
+            continue
+        industry_flow = _fetch_industry_sector_flow(bk_code, sector_name)
+        if industry_flow:
+            matched_items.append(industry_flow)
+            seen_names.add(sector_name)
+
+    items = matched_items
+    note = ""
+    if not matched_items:
+        items = top_items[:10]
+        note = "未匹配到指定板块，显示全市场资金流向靠前板块"
+    elif len(matched_items) < len(SECTOR_FLOW_KEYWORDS):
+        note = f"已匹配{len(matched_items)}个板块，部分行业板块数据未覆盖"
+    
+    return pass_group({"source": "python:eastmoney_sector_flow", "items": items, "note": note})
+
+
+def fetch_margin_group_python() -> dict[str, Any]:
+    try:
+        url = "https://datacenter-web.eastmoney.com/api/data/v1/get?reportName=RPTA_WEB_RZRQ_MRTJ&columns=ALL&pageNumber=1&pageSize=1&sortTypes=-1&sortColumns=DimDate&source=WEB&client=WEB"
+        payload = _request_json(url, headers=_request_headers("https://data.eastmoney.com/"))
+        data = payload.get("result")
+        if isinstance(data, dict):
+            records = data.get("data")
+            if isinstance(records, list) and len(records) > 0:
+                latest = records[0]
+                balance = _as_number(latest.get("finBalance"))
+                balance_text = f"{round((balance or 0) / 100000000, 2)}亿" if balance else None
+                margin_ratio = _as_number(latest.get("finBalanceRate"))
+                return pass_group({
+                    "source": "python:eastmoney_margin",
+                    "balance": balance,
+                    "balance_text": balance_text,
+                    "margin_ratio": margin_ratio,
+                })
+        raise ValueError("no margin data in response")
+    except Exception as error:
+        payload = blocked_group("python_fetch_failed", ["market_margin"], [])
+        payload["error"] = str(error)
+        return payload
+
+
+def fetch_northbound_flow_python() -> dict[str, Any]:
+    try:
+        url = "https://push2.eastmoney.com/api/qt/stock/ffk-day/get?lmt=0&klt=1&secid=1.000300&fields1=f1,f2,f3,f7&fields2=f51,f52,f53,f54,f55,f56,f57,f58,f59,f60,f61,f62,f63"
+        payload = _request_json(url, headers=_request_headers("https://quote.eastmoney.com/"))
+        data = payload.get("data")
+        if not isinstance(data, dict):
+            raise ValueError("missing northbound data")
+        diff = data.get("diff")
+        if not isinstance(diff, list):
+            raise ValueError("missing northbound diff")
+        recent_flows = []
+        for row in diff[-5:]:
+            if not isinstance(row, dict):
+                continue
+            date = str(row.get("f51", ""))
+            net_buy = _as_number(row.get("f56"))
+            if date and net_buy is not None:
+                recent_flows.append({"date": date, "net_buy": net_buy, "net_buy_text": f"{round(net_buy / 100000000, 2)}亿"})
+        if not recent_flows:
+            raise ValueError("no valid northbound flow data")
+        total_net_buy = sum(f.get("net_buy", 0) for f in recent_flows)
+        consecutive_sell_days = sum(1 for f in recent_flows if f.get("net_buy", 0) < 0)
+        return pass_group({
+            "source": "python:eastmoney_northbound",
+            "flows": recent_flows,
+            "total_net_buy": total_net_buy,
+            "total_net_buy_text": f"{round(total_net_buy / 100000000, 2)}亿",
+            "consecutive_sell_days": consecutive_sell_days,
+        })
+    except Exception as error:
+        payload = blocked_group("python_fetch_failed", ["northbound_flow"], [])
+        payload["error"] = str(error)
+        return payload
+
+
+LEADER_STOCK_CODES = ["603986", "688012", "688008", "688981", "300502"]
 
 
 def _china_yyyymmdd() -> str:
@@ -1188,23 +1672,23 @@ def _derive_market_context(market: dict[str, Any], funds: dict[str, Any]) -> dic
 
     items = payload.get("items")
     index_items = [item for item in items if isinstance(item, dict)] if isinstance(items, list) else []
-    above_ma20 = 0
-    above_ma40 = 0
-    below_ma40 = 0
+    above_ma10 = 0
+    above_ma30 = 0
+    below_ma30 = 0
     valid = 0
     for item in index_items:
         close = _close_value(item)
-        ma20 = _indicator_value(item, "ma20")
-        ma40 = _indicator_value(item, "ma40")
-        if close is None or ma20 is None or ma40 is None:
+        ma10 = _indicator_value(item, "ma10")
+        ma30 = _indicator_value(item, "ma30")
+        if close is None or ma10 is None or ma30 is None:
             continue
         valid += 1
-        if close >= ma20:
-            above_ma20 += 1
-        if close >= ma40:
-            above_ma40 += 1
-        if close < ma40:
-            below_ma40 += 1
+        if close >= ma10:
+            above_ma10 += 1
+        if close >= ma30:
+            above_ma30 += 1
+        if close < ma30:
+            below_ma30 += 1
 
     fund_flow = 0.0
     fund_scale = 0.0
@@ -1226,9 +1710,9 @@ def _derive_market_context(market: dict[str, Any], funds: dict[str, Any]) -> dic
     if not payload.get("environment"):
         if valid < len(MARKET_INDEX_CODES):
             return payload
-        if below_ma40 >= 2:
+        if below_ma30 >= 2:
             payload["environment"] = "减量市场"
-        elif above_ma20 >= 2 and above_ma40 >= 2 and fund_flow >= material_fund_flow:
+        elif above_ma10 >= 2 and above_ma30 >= 2 and fund_flow >= material_fund_flow:
             payload["environment"] = "增量市场"
         else:
             payload["environment"] = "存量市场"
@@ -1332,6 +1816,23 @@ def collect_snapshot(workspace: Path, offline: bool = False) -> dict[str, Any]:
     market = _derive_market_context(market, funds)
     emotion = _derive_emotion_context(emotion)
 
+    sector_flow = fetch_sector_flow_python()
+    margin = fetch_margin_group_python()
+    northbound = fetch_northbound_flow_python()
+
+    weekly_data: dict[str, Any] = {}
+    if state.get("status") == "PASS" and not offline:
+        positions = state.get("positions", [])
+        for pos in positions:
+            if not isinstance(pos, dict):
+                continue
+            code = str(pos.get("code") or "").strip()
+            if not code:
+                continue
+            weekly_result = fetch_weekly_kline(code, weeks=60)
+            if weekly_result.get("status") == "PASS":
+                weekly_data[code] = weekly_result
+
     snapshot: dict[str, Any] = {
         "state": state,
         "market": market,
@@ -1339,6 +1840,10 @@ def collect_snapshot(workspace: Path, offline: bool = False) -> dict[str, Any]:
         "funds": funds,
         "sectors": sectors,
         "emotion": emotion,
+        "sector_flow": sector_flow,
+        "margin": margin,
+        "northbound": northbound,
+        "weekly": weekly_data,
         "chrome_tasks": funds_tasks + sectors_tasks + emotion_tasks + market_tasks + stock_tasks,
         "collected_at": now_iso(),
     }

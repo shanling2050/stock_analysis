@@ -573,6 +573,28 @@ body.lightbox-open,
   .chart-frame, .chart-image-button { min-height: 360px; }
   .chart-frame img { max-height: 500px; }
 }
+
+.intraday-guide { margin-top: 24px; }
+.intraday-guide h4 { margin-bottom: 16px; color: #1a1a1a; }
+.guide-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 16px; }
+.guide-item { background: #f8f9fa; border-radius: 8px; padding: 16px; border: 1px solid #e9ecef; }
+.guide-header { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; }
+.guide-priority { 
+  background: #6c757d; color: #fff; padding: 2px 8px; border-radius: 4px; 
+  font-size: 12px; font-weight: 500; 
+}
+.guide-content { display: flex; flex-direction: column; gap: 8px; }
+.guide-status, .guide-good, .guide-danger, .guide-action { 
+  padding: 8px 12px; border-radius: 4px; font-size: 14px; 
+}
+.guide-status { background: #e7f1ff; border-left: 3px solid #0d6efd; }
+.guide-good { background: #d1e7dd; border-left: 3px solid #198754; }
+.guide-danger { background: #f8d7da; border-left: 3px solid #dc3545; }
+.guide-action { background: #fff3cd; border-left: 3px solid #ffc107; }
+.guide-label { 
+  font-weight: 600; margin-right: 8px; 
+  display: inline-block; min-width: 48px; 
+}
 """
 
 HTML_REPORT_JS = """
@@ -725,13 +747,13 @@ def _compact_security_item(item: Any) -> Any:
         return item
 
     compact: dict[str, Any] = {}
-    for key in ("code", "name", "close", "price", "ma20", "ma40", "source"):
+    for key in ("code", "name", "close", "price", "ma10", "ma30", "source"):
         if key in item:
             compact[key] = item[key]
 
     indicators = item.get("indicators")
     if isinstance(indicators, dict):
-        for key in ("ma20", "ma40"):
+        for key in ("ma10", "ma30"):
             if key not in compact and key in indicators:
                 compact[key] = indicators[key]
 
@@ -794,24 +816,24 @@ def odds(price: Any, target: Any, stop: Any) -> float:
 
 def position_action(item: dict[str, Any]) -> dict[str, str]:
     close = _as_float(item.get("close", item.get("price")))
-    ma20 = _as_float(item.get("ma20"))
-    ma40 = _as_float(item.get("ma40"))
+    ma10 = _as_float(item.get("ma10"))
+    ma30 = _as_float(item.get("ma30"))
     stock = _stock_label(item)
 
-    if close is not None and ma40 is not None and close < ma40:
+    if close is not None and ma30 is not None and close < ma30:
         return {
             "bucket": "必须执行",
             "stock": stock,
             "action": "退出",
-            "text": f"{stock}：收盘跌破 MA40，趋势纪律触发；次日开盘一次性退出。",
+            "text": f"{stock}：收盘跌破 MA30，趋势纪律触发；次日开盘一次性退出。",
         }
 
-    if close is not None and ma20 is not None and close < ma20:
+    if close is not None and ma10 is not None and close < ma10:
         return {
             "bucket": "条件执行",
             "stock": stock,
             "action": "减仓",
-            "text": f"{stock}：收盘跌破 MA20，先减仓；若 1-2 日不能快速收回 MA20，继续降风险，严禁补仓。",
+            "text": f"{stock}：收盘跌破 MA10，先减仓；若 1-2 日不能快速收回 MA10，继续降风险，严禁补仓。",
         }
     
     cost = _as_float(item.get("cost"))
@@ -825,20 +847,20 @@ def position_action(item: dict[str, Any]) -> dict[str, str]:
                 "text": f"{stock}：当前盈利 {profit_pct:.1f}%，已偏离成本30%以上，建议减仓1/3止盈。",
             }
     
-    if close is not None and ma20 is not None and ma40 is not None:
-        if close >= ma20 and close >= ma40 and ma20 >= ma40:
+    if close is not None and ma10 is not None and ma30 is not None:
+        if close >= ma10 and close >= ma30 and ma10 >= ma30:
             return {
                 "bucket": "条件执行",
                 "stock": stock,
                 "action": "加仓",
-                "text": f"{stock}：股价站上MA20/MA40，均线多头排列，可考虑加仓机会。",
+                "text": f"{stock}：股价站上MA10/MA30，均线多头排列，可考虑加仓机会。",
             }
 
     return {
         "bucket": "观察等待",
         "stock": stock,
         "action": "持有",
-        "text": f"{stock}：持有观察，执行 MA20/MA40 纪律；跌破 MA20 减仓，跌破 MA40 退出。",
+        "text": f"{stock}：持有观察，执行 MA10/MA30 纪律；跌破 MA10 减仓，跌破 MA30 退出。",
     }
 
 
@@ -1354,14 +1376,14 @@ def _stock_data_by_code(snapshot: dict[str, Any]) -> dict[str, dict[str, Any]]:
         if close is not None:
             merged["close"] = close
             merged["price"] = close
-        for key in ("ma20", "ma40"):
+        for key in ("ma10", "ma30"):
             direct = _as_float(item.get(key))
             if direct is not None:
                 merged[key] = direct
         indicators = item.get("indicators")
         if isinstance(indicators, dict):
             merged["indicators"] = dict(indicators)
-            for key in ("ma20", "ma40"):
+            for key in ("ma10", "ma30"):
                 if key in indicators and key not in merged:
                     merged[key] = indicators[key]
         code_key = _code_key(code)
@@ -1497,7 +1519,7 @@ def _append_action_table(lines: list[str], position_actions: list[dict[str, str]
     )
     for action in position_actions:
         lines.append(
-            "| {stock} | 持仓 | {bucket} | {action} | MA20/MA40 | 按纪律处理，不加破位仓 | {text} |".format(
+            "| {stock} | 持仓 | {bucket} | {action} | MA10/MA30 | 按纪律处理，不加破位仓 | {text} |".format(
                 stock=_md_cell(action["stock"]),
                 bucket=_md_cell(ACTION_DISPLAY_NAMES.get(action["bucket"], action["bucket"])),
                 action=_md_cell(action["action"]),
@@ -1523,28 +1545,28 @@ def _append_action_table(lines: list[str], position_actions: list[dict[str, str]
 def _market_index_line(market: dict[str, Any]) -> str:
     items = [item for item in _as_list(market.get("items")) if isinstance(item, dict)]
     total = 0
-    above_ma20 = 0
-    above_ma40 = 0
+    above_ma10 = 0
+    above_ma30 = 0
     details: list[str] = []
     for item in items:
         close = _close_value(item)
-        ma20 = _indicator_value(item, "ma20")
-        ma40 = _indicator_value(item, "ma40")
+        ma10 = _indicator_value(item, "ma10")
+        ma30 = _indicator_value(item, "ma30")
         if close is None:
             continue
         total += 1
-        if ma20 is not None and close >= ma20:
-            above_ma20 += 1
-        if ma40 is not None and close >= ma40:
-            above_ma40 += 1
+        if ma10 is not None and close >= ma10:
+            above_ma10 += 1
+        if ma30 is not None and close >= ma30:
+            above_ma30 += 1
         label = _stock_label(item)
-        if ma20 is not None and ma40 is not None:
-            details.append(f"{label} 收盘 {_format_number(close)} / MA20 {_format_number(ma20)} / MA40 {_format_number(ma40)}")
+        if ma10 is not None and ma30 is not None:
+            details.append(f"{label} 收盘 {_format_number(close)} / MA10 {_format_number(ma10)} / MA30 {_format_number(ma30)}")
 
     if total == 0:
         return "核心指数缺少可用 K 线，市场方向只能降级为观察。"
 
-    prefix = f"{above_ma20}/{total} 个核心指数站上 MA20，{above_ma40}/{total} 个站上 MA40"
+    prefix = f"{above_ma10}/{total} 个核心指数站上 MA10，{above_ma30}/{total} 个站上 MA30"
     if details:
         return f"{prefix}；" + "；".join(details[:3])
     return prefix
@@ -1553,22 +1575,22 @@ def _market_index_line(market: dict[str, Any]) -> str:
 def _market_index_summary(market: dict[str, Any]) -> str:
     items = [item for item in _as_list(market.get("items")) if isinstance(item, dict)]
     total = 0
-    above_ma20 = 0
-    above_ma40 = 0
+    above_ma10 = 0
+    above_ma30 = 0
     for item in items:
         close = _close_value(item)
-        ma20 = _indicator_value(item, "ma20")
-        ma40 = _indicator_value(item, "ma40")
+        ma10 = _indicator_value(item, "ma10")
+        ma30 = _indicator_value(item, "ma30")
         if close is None:
             continue
         total += 1
-        if ma20 is not None and close >= ma20:
-            above_ma20 += 1
-        if ma40 is not None and close >= ma40:
-            above_ma40 += 1
+        if ma10 is not None and close >= ma10:
+            above_ma10 += 1
+        if ma30 is not None and close >= ma30:
+            above_ma30 += 1
     if total == 0:
         return "核心指数缺少有效样本"
-    return f"{above_ma20}/{total} 站上 MA20，{above_ma40}/{total} 站上 MA40"
+    return f"{above_ma10}/{total} 站上 MA10，{above_ma30}/{total} 站上 MA30"
 
 
 def _fund_flow_line(snapshot: dict[str, Any]) -> str:
@@ -1683,28 +1705,29 @@ def _append_market_evidence(lines: list[str], snapshot: dict[str, Any]) -> None:
     )
 
 
-def _trend_status_text(item: dict[str, Any]) -> str:
+def _trend_status_text(item: dict[str, Any], weekly_data: Optional[dict[str, Any]] = None) -> str:
     close = _close_value(item)
-    ma20 = _indicator_value(item, "ma20")
+    ma10 = _indicator_value(item, "ma10")
+    ma30 = _indicator_value(item, "ma30")
     ma40 = _indicator_value(item, "ma40")
     cost = _as_float(item.get("cost"))
     if close is None:
         return "缺少最新收盘价，当前结构只能按数据不足处理。"
-    if ma20 is None or ma40 is None:
-        return f"现价 {_format_number(close)}，但 MA20/MA40 不完整，趋势判断降级为观察。"
+    if ma10 is None or ma30 is None:
+        return f"现价 {_format_number(close)}，但 MA10/MA30 不完整，趋势判断降级为观察。"
     
     result = []
-    if close >= ma20 and close >= ma40:
-        if ma20 >= ma40:
-            result.append(f"现价 {_format_number(close)} 位于 MA20 {_format_number(ma20)} 和 MA40 {_format_number(ma40)} 上方，短中期结构偏强。")
+    if close >= ma10 and close >= ma30:
+        if ma10 >= ma30:
+            result.append(f"现价 {_format_number(close)} 位于 MA10 {_format_number(ma10)} 和 MA30 {_format_number(ma30)} 上方，短中期结构偏强。")
         else:
-            result.append(f"现价 {_format_number(close)} 已站上 MA20 {_format_number(ma20)} 和 MA40 {_format_number(ma40)}，但 MA20 仍低于 MA40，属于反弹修复，需看回踩确认。")
-    elif close >= ma20 and close < ma40:
-        result.append(f"现价 {_format_number(close)} 站上 MA20 {_format_number(ma20)}，但仍低于 MA40 {_format_number(ma40)}，属于修复未完成。")
-    elif close < ma20 and close >= ma40:
-        result.append(f"现价 {_format_number(close)} 跌破 MA20 {_format_number(ma20)}，但仍在 MA40 {_format_number(ma40)} 上方，进入回踩观察。")
+            result.append(f"现价 {_format_number(close)} 已站上 MA10 {_format_number(ma10)} 和 MA30 {_format_number(ma30)}，但 MA10 仍低于 MA30，属于反弹修复，需看回踩确认。")
+    elif close >= ma10 and close < ma30:
+        result.append(f"现价 {_format_number(close)} 站上 MA10 {_format_number(ma10)}，但仍低于 MA30 {_format_number(ma30)}，属于修复未完成。")
+    elif close < ma10 and close >= ma30:
+        result.append(f"现价 {_format_number(close)} 跌破 MA10 {_format_number(ma10)}，但仍在 MA30 {_format_number(ma30)} 上方，进入回踩观察。")
     else:
-        result.append(f"现价 {_format_number(close)} 跌破 MA40 {_format_number(ma40)}，趋势纪律转弱。")
+        result.append(f"现价 {_format_number(close)} 跌破 MA30 {_format_number(ma30)}，趋势纪律转弱。")
     
     if cost is not None and close is not None and cost > 0:
         loss_pct = (cost - close) / cost * 100
@@ -1716,21 +1739,50 @@ def _trend_status_text(item: dict[str, Any]) -> str:
             result.append(f"止损触发2：当前亏损 {loss_pct:.1f}%，已低于成本15%，需减仓30%。")
         elif loss_pct > 0:
             result.append(f"止损触发2：当前亏损 {loss_pct:.1f}%，未触发减仓线，继续观察。")
-        else:
-            profit_pct = (close - cost) / cost * 100
-            result.append(f"止盈触发：当前盈利 {profit_pct:.1f}%，注意偏离20周线25-30%以上减1/3。")
     
-    ma20_trend = "抬头" if ma20 is not None and close is not None and close >= ma20 else "向下"
-    ma40_trend = "抬头" if ma40 is not None and close is not None and close >= ma40 else "向下"
-    if close is not None and ma20 is not None and ma40 is not None:
-        if close >= ma20 and close >= ma40 and ma20 >= ma40:
-            result.append(f"右侧加仓触发：股价站上MA20/MA40，均线多头排列，可考虑第二仓或第三仓加仓机会。")
-        elif close >= ma20 and close < ma40:
-            result.append(f"右侧加仓触发：股价站上MA20但未破MA40，属于第一仓建仓或加仓观察区。")
-        elif close < ma20 and close >= ma40:
-            result.append(f"右侧加仓触发：股价回踩MA20，若缩量止跌可考虑第二仓加仓机会。")
+    if weekly_data and cost:
+        weekly_close = weekly_data.get("close")
+        weekly_indicators = weekly_data.get("indicators") if isinstance(weekly_data.get("indicators"), dict) else {}
+        weekly_ma10 = weekly_indicators.get("ma10")
+        weekly_ma20 = weekly_indicators.get("ma20")
+        if weekly_close and weekly_ma10 and weekly_ma20:
+            profit_pct = (weekly_close - cost) / cost * 100
+            above_ma10 = weekly_close > weekly_ma10
+            above_ma20 = weekly_close > weekly_ma20
+            rows = weekly_data.get("rows", [])
+            trend_stagnant = False
+            if isinstance(rows, list) and len(rows) >= 5:
+                recent_closes = [r.get("close") for r in rows[-5:] if isinstance(r, dict)]
+                if len(recent_closes) >= 5:
+                    max_close = max(recent_closes[:-1])
+                    if recent_closes[-1] <= max_close:
+                        trend_stagnant = True
+            
+            if profit_pct >= 50:
+                result.append(f"止盈触发：盈利{profit_pct:.1f}%，已达50%+，仓位降至30%以下。")
+            elif not above_ma20:
+                result.append(f"止盈触发：跌破20周线{_format_number(weekly_ma20)}，全清。")
+            elif not above_ma10:
+                result.append(f"止盈触发：跌破10周线{_format_number(weekly_ma10)}，减半仓。")
+            elif trend_stagnant:
+                result.append(f"止盈触发：周线趋势钝化，仓位降至30-50%。")
+            elif above_ma10 and above_ma20:
+                if ma40 and close < ma40:
+                    result.append(f"止盈触发：站上10周线，但日线破40天线{_format_number(ma40)}，减仓观察。")
+                else:
+                    result.append(f"止盈触发：周线多头排列，盈利{profit_pct:.1f}%，持有。")
+            else:
+                result.append(f"止盈触发：盈利{profit_pct:.1f}%，观察周线支撑。")
+    
+    if close is not None and ma10 is not None and ma30 is not None:
+        if close >= ma10 and close >= ma30 and ma10 >= ma30:
+            result.append(f"右侧加仓触发：股价站上MA10/MA30，均线多头排列，可考虑第二仓或第三仓加仓机会。")
+        elif close >= ma10 and close < ma30:
+            result.append(f"右侧加仓触发：股价站上MA10但未破MA30，属于第一仓建仓或加仓观察区。")
+        elif close < ma10 and close >= ma30:
+            result.append(f"右侧加仓触发：股价回踩MA10，若缩量止跌可考虑第二仓加仓机会。")
         else:
-            result.append(f"右侧加仓触发：股价跌破MA40，趋势转弱，暂不加仓。")
+            result.append(f"右侧加仓触发：股价跌破MA30，趋势转弱，暂不加仓。")
     
     return "；".join(result)
 
@@ -1812,25 +1864,25 @@ def _join_steps(steps: list[str]) -> str:
 
 
 def _position_playbook(item: dict[str, Any], action: dict[str, str]) -> str:
-    ma20 = _indicator_value(item, "ma20")
-    ma40 = _indicator_value(item, "ma40")
+    ma10 = _indicator_value(item, "ma10")
+    ma30 = _indicator_value(item, "ma30")
     support, pressure = _recent_support_pressure(item)
     stop = _hard_stop_value(item)
     steps = []
     if action.get("action") == "退出":
-        steps.append("明日优先执行退出纪律，退出后不在 MA40 下方摊低成本。")
+        steps.append("明日优先执行退出纪律，退出后不在 MA30 下方摊低成本。")
     elif action.get("action") == "减仓":
-        steps.append("先按纪律降仓，1-2 日不能收回 MA20 就继续降低风险。")
+        steps.append("先按纪律降仓，1-2 日不能收回 MA10 就继续降低风险。")
     else:
-        steps.append("只要未破 MA20/MA40，持仓以跟踪为主，不因为盘中波动提前改变计划。")
-    if ma20 is not None:
-        steps.append(f"若放量站稳 MA20 {_format_number(ma20)} 并保持板块共振，可保留仓位观察。")
+        steps.append("只要未破 MA10/MA30，持仓以跟踪为主，不因为盘中波动提前改变计划。")
+    if ma10 is not None:
+        steps.append(f"若放量站稳 MA10 {_format_number(ma10)} 并保持板块共振，可保留仓位观察。")
     if pressure is not None:
         steps.append(f"若有效突破压力 {_format_number(pressure)} 后回踩不破，可把它视为强势延续确认，不追高加满。")
     if support is not None:
         steps.append(f"若跌破支撑 {_format_number(support)}，先把防守动作放在盈利想象之前。")
-    if ma40 is not None:
-        steps.append(f"若收盘跌破 MA40 {_format_number(ma40)}，按纪律退出。")
+    if ma30 is not None:
+        steps.append(f"若收盘跌破 MA30 {_format_number(ma30)}，按纪律退出。")
     if stop is not None:
         steps.append(f"硬止损参考 {_format_number(stop)}，这是成本线下方 15% 的生死线。")
     return "远期剧本：" + _join_steps(steps) + "。"
@@ -1880,8 +1932,8 @@ def _chart_meta(item: dict[str, Any], *, include_trade_plan_levels: bool = True)
         "candle_count": len(candles),
         "has_volume": any(volume > 0 for volume in volumes),
         "has_ma5": len(candles) >= 5,
-        "has_ma20": len(candles) >= 20,
-        "has_ma40": len(candles) >= 40,
+        "has_ma10": len(candles) >= 10,
+        "has_ma30": len(candles) >= 30,
         "support": levels["support"],
         "resistance": levels["resistance"],
         "hard_stop": levels["hard_stop"],
@@ -1986,8 +2038,8 @@ def _kline_chart_png_bytes(item: dict[str, Any], *, include_trade_plan_levels: b
         include_stop=include_trade_plan_levels,
     )
     ma5 = _rolling_average(closes, 5)
-    ma20 = _rolling_average(closes, 20)
-    ma40 = _rolling_average(closes, 40)
+    ma10 = _rolling_average(closes, 10)
+    ma30 = _rolling_average(closes, 30)
 
     _set_chart_fonts(plt)
     fig = plt.figure(figsize=(14.6, 8.2), dpi=130, facecolor="white")
@@ -2025,10 +2077,10 @@ def _kline_chart_png_bytes(item: dict[str, Any], *, include_trade_plan_levels: b
 
         if len(closes) >= 5:
             axis.plot(x_values, ma5, color="#f5a623", linewidth=1.35, label="MA5")
-        if len(closes) >= 20:
-            axis.plot(x_values, ma20, color="#3366cc", linewidth=1.45, label="MA20")
-        if len(closes) >= 40:
-            axis.plot(x_values, ma40, color="#8f5cc2", linewidth=1.45, label="MA40")
+        if len(closes) >= 10:
+            axis.plot(x_values, ma10, color="#3366cc", linewidth=1.45, label="MA10")
+        if len(closes) >= 30:
+            axis.plot(x_values, ma30, color="#8f5cc2", linewidth=1.45, label="MA30")
 
         level_colors = {
             "resistance": "#b91c1c",
@@ -2334,12 +2386,245 @@ def _today_script_html(snapshot: dict[str, Any]) -> str:
         + f"<h3>{_html(thesis)}</h3>"
         + f"<p>{_html(risk)}</p>"
         + '<div class="script-grid">'
-        + "<div><strong>持仓</strong><span>按 MA20/MA40 与硬止损纪律处理，不因盘中波动提前改计划。</span></div>"
+        + "<div><strong>持仓</strong><span>按 MA10/MA30 与硬止损纪律处理，不因盘中波动提前改计划。</span></div>"
         + "<div><strong>关注池</strong><span>只看接近支撑、突破压力、趋势转弱三类技术位置。</span></div>"
         + "<div><strong>风险边界</strong><span>市场偏热时不追高，先等回踩确认或有效突破。</span></div>"
         + "</div></div></div>"
     )
+
+    sector_flow = snapshot.get("sector_flow") if isinstance(snapshot.get("sector_flow"), dict) else {}
+    margin = snapshot.get("margin") if isinstance(snapshot.get("margin"), dict) else {}
+    northbound = snapshot.get("northbound") if isinstance(snapshot.get("northbound"), dict) else {}
+    stocks = snapshot.get("stocks") if isinstance(snapshot.get("stocks"), dict) else {}
+
+    if sector_flow.get("status") == "PASS" or margin.get("status") == "PASS" or northbound.get("status") == "PASS":
+        extra_html = ""
+        if sector_flow.get("status") == "PASS" and sector_flow.get("items"):
+            items = sector_flow.get("items", [])
+            rows_html = ""
+            for item in items:
+                change_pct = item.get("change_pct")
+                change_str = f"{'+' if (change_pct or 0) >= 0 else ''}{_format_pct(change_pct)}" if change_pct is not None else "-"
+                rows_html += (
+                    f"<tr>"
+                    f'<td class="stock-name">{_html(item.get("name", ""))}</td>'
+                    f'<td class="stock-code">{change_str}</td>'
+                    f'<td class="stock-quantity">{_html(item.get("main_net_inflow", "-"))}</td>'
+                    f'<td class="stock-quantity">{_html(item.get("super_large_net_inflow", "-"))}</td>'
+                    f"</tr>"
+                )
+            extra_html += (
+                '<div class="script-section">'
+                + "<h4>板块资金流向</h4>"
+                + '<table class="data-table">'
+                + "<thead><tr><th>板块</th><th>涨跌幅</th><th>主力净流入</th><th>超大单净流入</th></tr></thead>"
+                + f"<tbody>{rows_html}</tbody>"
+                + "</table></div>"
+            )
+        if margin.get("status") == "PASS":
+            balance_text = margin.get("balance_text") or "-"
+            margin_ratio = margin.get("margin_ratio")
+            ratio_str = f"{_format_pct(margin_ratio)}" if margin_ratio is not None else "-"
+            extra_html += (
+                '<div class="script-section">'
+                + "<h4>整体市场融资余额</h4>"
+                + '<div class="kpi-grid market-grid">'
+                + _market_metric_html("融资余额", balance_text, "反映市场杠杆情绪")
+                + _market_metric_html("融资比例", ratio_str, "融资余额占市场总市值的比例")
+                + "</div></div>"
+            )
+
+        intraday_guide_html = _build_intraday_guide_html(northbound, stocks, snapshot)
+        extra_html += intraday_guide_html
+        body += extra_html
+
     return f'<section class="report-section today-script" id="today-script">{body}</section>'
+
+
+def _build_intraday_guide_html(northbound: dict[str, Any], stocks: dict[str, Any], snapshot: dict[str, Any]) -> str:
+    weekly = snapshot.get("weekly") if isinstance(snapshot.get("weekly"), dict) else {}
+    state = snapshot.get("state") if isinstance(snapshot.get("state"), dict) else {}
+    positions = state.get("positions") if isinstance(state.get("positions"), list) else []
+
+    leader_codes = ["603986", "688012", "688008", "688981", "300502"]
+    leader_status = []
+    volume_analysis = []
+    for code in leader_codes:
+        stock_data = stocks.get(code) if isinstance(stocks.get(code), dict) else None
+        if stock_data and stock_data.get("status") == "PASS":
+            indicators = stock_data.get("indicators") if isinstance(stock_data.get("indicators"), dict) else {}
+            close = stock_data.get("close")
+            ma20 = indicators.get("ma20")
+            rows = stock_data.get("rows", [])
+            if close is not None and ma20 is not None:
+                above_ma20 = close > ma20
+                leader_status.append({
+                    "code": code,
+                    "name": stock_data.get("name", code),
+                    "close": close,
+                    "ma20": ma20,
+                    "above_ma20": above_ma20,
+                })
+            if isinstance(rows, list) and len(rows) >= 5:
+                recent_rows = rows[-5:]
+                vol_changes = []
+                price_changes = []
+                for i in range(len(recent_rows) - 1):
+                    curr = recent_rows[i + 1]
+                    prev = recent_rows[i]
+                    curr_vol = _as_float(curr.get("volume"))
+                    prev_vol = _as_float(prev.get("volume"))
+                    curr_close = _as_float(curr.get("close"))
+                    prev_close = _as_float(prev.get("close"))
+                    if curr_vol and prev_vol and curr_close and prev_close:
+                        vol_change = (curr_vol - prev_vol) / prev_vol * 100
+                        price_change = (curr_close - prev_close) / prev_close * 100
+                        vol_changes.append(vol_change)
+                        price_changes.append(price_change)
+                if vol_changes and price_changes:
+                    down_days = sum(1 for p in price_changes if p < 0)
+                    up_days = sum(1 for p in price_changes if p > 0)
+                    down_shrink_vol = sum(1 for i, p in enumerate(price_changes) if p < 0 and vol_changes[i] < 0)
+                    up_expand_vol = sum(1 for i, p in enumerate(price_changes) if p > 0 and vol_changes[i] > 0)
+                    volume_analysis.append({
+                        "code": code,
+                        "name": stock_data.get("name", code),
+                        "down_shrink": down_shrink_vol,
+                        "up_expand": up_expand_vol,
+                        "total_days": len(price_changes),
+                    })
+
+    northbound_status = "PASS" if northbound.get("status") == "PASS" else "BLOCK"
+    consecutive_sell = northbound.get("consecutive_sell_days", 0) if northbound_status == "PASS" else 0
+    total_flow_text = northbound.get("total_net_buy_text", "-") if northbound_status == "PASS" else "-"
+
+    leaders_above = sum(1 for l in leader_status if l.get("above_ma20"))
+    leaders_below = len(leader_status) - leaders_above
+
+    volume_status = "良性" if volume_analysis and sum(v.get("up_expand", 0) for v in volume_analysis) >= sum(v.get("down_shrink", 0) for v in volume_analysis) else "需关注"
+    volume_detail = ""
+    if volume_analysis:
+        for v in volume_analysis[:3]:
+            volume_detail += f"{v.get('name')}: 下跌缩量{v.get('down_shrink')}天, 反弹放量{v.get('up_expand')}天; "
+        volume_detail = volume_detail.rstrip("; ")
+
+    volume_guide = (
+        '<div class="guide-item">'
+        + '<div class="guide-header"><span class="guide-priority">第一优先级</span><strong>成交量与量价关系</strong></div>'
+        + '<div class="guide-content">'
+        + f'<div class="guide-status"><span class="guide-label">当前状态</span>{volume_status}</div>'
+        + f'<div class="guide-detail"><span class="guide-label">龙头量价</span>{volume_detail or "数据不足"}</div>'
+        + '<div class="guide-good"><span class="guide-label">良性</span>下跌缩量、反弹放量；高位震荡不放巨量，没有持续放量滞涨。</div>'
+        + '<div class="guide-danger"><span class="guide-label">危险</span>连续阴线放量、冲高无量回落、板块单日成交额创出历史极值后无法持续。</div>'
+        + '<div class="guide-action"><span class="guide-label">操作</span>放量滞涨当天先减30%仓位。</div>'
+        + "</div></div>"
+    )
+
+    leader_ma20_text = f"{leaders_above}/{len(leader_status)}只站上MA20" if leader_status else "数据获取中"
+    leader_guide = (
+        '<div class="guide-item">'
+        + '<div class="guide-header"><span class="guide-priority">趋势生命线</span><strong>龙头强弱 + 20日均线趋势</strong></div>'
+        + '<div class="guide-content">'
+        + f'<div class="guide-status"><span class="guide-label">当前状态</span>{leader_ma20_text}</div>'
+        + '<div class="guide-good"><span class="guide-label">良性</span>板块核心龙头抗跌，20日均线持续向上，回调踩线就有资金承接。</div>'
+        + '<div class="guide-danger"><span class="guide-label">危险</span>龙头率先跌破20日线且反抽站不回去，低位杂毛小票轮番补涨。</div>'
+        + '<div class="guide-action"><span class="guide-label">操作</span>龙头破位开始分批降底仓，不再新开仓。</div>'
+        + "</div></div>"
+    )
+
+    northbound_guide_status = "连续净卖出" if consecutive_sell >= 3 else "正常"
+    northbound_guide = (
+        '<div class="guide-item">'
+        + '<div class="guide-header"><span class="guide-priority">资金态度</span><strong>北向资金流向</strong></div>'
+        + '<div class="guide-content">'
+        + f'<div class="guide-status"><span class="guide-label">近5日净买</span>{total_flow_text}（{northbound_guide_status}）</div>'
+        + '<div class="guide-good"><span class="guide-label">良性</span>单日大跌北向逆势小幅净流入，融资盘小幅回落快速修复。</div>'
+        + '<div class="guide-danger"><span class="guide-label">危险</span>北向连续3个交易日净卖出，公募私募持仓高位集中开始兑现。</div>'
+        + '<div class="guide-action"><span class="guide-label">操作</span>连续流出阶段只卖不买。</div>'
+        + "</div></div>"
+    )
+
+    profit_trigger_status = []
+    for pos in positions:
+        if not isinstance(pos, dict):
+            continue
+        code = str(pos.get("code") or "").strip()
+        cost = _as_float(pos.get("cost"))
+        weekly_data = weekly.get(code) if isinstance(weekly.get(code), dict) else None
+        stock_data = stocks.get(code) if isinstance(stocks.get(code), dict) else None
+        if not weekly_data or not cost:
+            continue
+        weekly_close = weekly_data.get("close")
+        weekly_indicators = weekly_data.get("indicators") if isinstance(weekly_data.get("indicators"), dict) else {}
+        weekly_ma10 = weekly_indicators.get("ma10")
+        weekly_ma20 = weekly_indicators.get("ma20")
+        if weekly_close is None or weekly_ma10 is None or weekly_ma20 is None:
+            continue
+        profit_pct = ((weekly_close - cost) / cost) * 100 if cost else 0
+        above_ma10 = weekly_close > weekly_ma10
+        above_ma20 = weekly_close > weekly_ma20
+        rows = weekly_data.get("rows", [])
+        trend_stagnant = False
+        if isinstance(rows, list) and len(rows) >= 5:
+            recent_closes = [r.get("close") for r in rows[-5:] if isinstance(r, dict)]
+            if len(recent_closes) >= 5:
+                max_close = max(recent_closes[:-1])
+                if recent_closes[-1] <= max_close:
+                    trend_stagnant = True
+        profit_trigger_status.append({
+            "code": code,
+            "name": pos.get("name", code),
+            "cost": cost,
+            "close": weekly_close,
+            "profit_pct": profit_pct,
+            "above_ma10": above_ma10,
+            "above_ma20": above_ma20,
+            "trend_stagnant": trend_stagnant,
+        })
+
+    profit_trigger_summary = "无持仓数据"
+    profit_trigger_detail = ""
+    if profit_trigger_status:
+        high_profit = [p for p in profit_trigger_status if p.get("profit_pct", 0) >= 50]
+        break_ma10 = [p for p in profit_trigger_status if not p.get("above_ma10")]
+        break_ma20 = [p for p in profit_trigger_status if not p.get("above_ma20")]
+        stagnant = [p for p in profit_trigger_status if p.get("trend_stagnant")]
+        if high_profit:
+            profit_trigger_summary = f"盈利50%+：{len(high_profit)}只需降仓至30%以下"
+        elif break_ma20:
+            profit_trigger_summary = f"跌破20周线：{len(break_ma20)}只需全清"
+        elif break_ma10:
+            profit_trigger_summary = f"跌破10周线：{len(break_ma10)}只需减半仓"
+        elif stagnant:
+            profit_trigger_summary = f"趋势钝化：{len(stagnant)}只需降仓至30-50%"
+        else:
+            profit_trigger_summary = f"{len([p for p in profit_trigger_status if p.get('above_ma10')])}只站上10周线，持有"
+        for p in profit_trigger_status[:3]:
+            profit_trigger_detail += f"{p.get('name')}: 盈利{_format_pct(p.get('profit_pct'))}, {('站上' if p.get('above_ma10') else '跌破')}10周线; "
+        profit_trigger_detail = profit_trigger_detail.rstrip("; ")
+
+    profit_trigger_guide = (
+        '<div class="guide-item">'
+        + '<div class="guide-header"><span class="guide-priority">止盈纪律</span><strong>止盈触发分析</strong></div>'
+        + '<div class="guide-content">'
+        + f'<div class="guide-status"><span class="guide-label">当前状态</span>{profit_trigger_summary}</div>'
+        + f'<div class="guide-detail"><span class="guide-label">持仓详情</span>{profit_trigger_detail or "无数据"}</div>'
+        + '<div class="guide-good"><span class="guide-label">良性</span>周线多头排列，价格在10周线上方，日线正常持有。</div>'
+        + '<div class="guide-danger"><span class="guide-label">危险</span>周线收盘跌破10周线减半仓；跌破20周线全清；盈利50%+降仓至30%以下。</div>'
+        + '<div class="guide-action"><span class="guide-label">操作</span>让利润奔跑，但仓位收缩。</div>'
+        + "</div></div>"
+    )
+
+    return (
+        '<div class="script-section intraday-guide">'
+        + "<h4>盘中操作参考指南</h4>"
+        + '<div class="guide-grid">'
+        + volume_guide
+        + leader_guide
+        + northbound_guide
+        + profit_trigger_guide
+        + "</div></div>"
+    )
 
 
 def _emotion_temperature_value(emotion: dict[str, Any]) -> str:
@@ -2399,33 +2684,70 @@ def _action_chip_class(action_name: str) -> str:
     return "chip chip-action"
 
 
-def _action_matrix_row_html(action: dict[str, str], identity: str, item: Optional[dict[str, Any]] = None) -> str:
+def _action_matrix_row_html(action: dict[str, str], identity: str, item: Optional[dict[str, Any]] = None, weekly_data: Optional[dict[str, Any]] = None) -> str:
     action_name = action.get("action", "观察")
     stock = action.get("stock", "未知")
     identity_class = "chip-position" if identity == "持仓" else "chip-watch"
-    technical_status = _trend_status_text(item) if isinstance(item, dict) else ACTION_DISPLAY_NAMES.get(
+    technical_status = _trend_status_text(item, weekly_data) if isinstance(item, dict) else ACTION_DISPLAY_NAMES.get(
         action.get("bucket", ""), action.get("bucket", "观察等待")
     )
     technical_status_lines = technical_status.split("；")
     technical_status_html = "<br>".join(_html(line.strip()) for line in technical_status_lines if line.strip())
     trigger = action.get("trigger")
     if not trigger:
-        trigger = "跌破 MA20 减仓；跌破 MA40 退出" if identity == "持仓" else "支撑/压力/均线"
+        trigger = "跌破 MA10 减仓；跌破 MA30 退出" if identity == "持仓" else "支撑/压力/均线"
     
     add_position_trigger = ""
-    if isinstance(item, dict):
+    if isinstance(item, dict) and weekly_data and isinstance(weekly_data, dict):
+        cost = _as_float(item.get("cost"))
+        weekly_close = weekly_data.get("close")
+        weekly_indicators = weekly_data.get("indicators") if isinstance(weekly_data.get("indicators"), dict) else {}
+        weekly_ma10 = weekly_indicators.get("ma10")
+        weekly_ma20 = weekly_indicators.get("ma20")
         close = _close_value(item)
         ma20 = _indicator_value(item, "ma20")
-        ma40 = _indicator_value(item, "ma40")
-        if close is not None and ma20 is not None and ma40 is not None:
-            if close >= ma20 and close >= ma40 and ma20 >= ma40:
-                add_position_trigger = "站上MA20/MA40，均线多头，可考虑第二仓或第三仓"
-            elif close >= ma20 and close < ma40:
-                add_position_trigger = "站上MA20未破MA40，第一仓建仓或加仓观察区"
-            elif close < ma20 and close >= ma40:
-                add_position_trigger = "回踩MA20，若缩量止跌可考虑第二仓"
+        ma50 = _indicator_value(item, "ma50")
+        if cost and weekly_close and weekly_ma10 and weekly_ma20:
+            profit_pct = (weekly_close - cost) / cost * 100
+            above_ma10 = weekly_close > weekly_ma10
+            above_ma20 = weekly_close > weekly_ma20
+            if profit_pct > 0 and above_ma10 and above_ma20 and weekly_ma10 >= weekly_ma20:
+                add_position_trigger = "盈利+周线多头，可考虑加仓"
+                if close is not None and ma20 is not None:
+                    if ma20 * 0.99 <= close <= ma20 * 1.01:
+                        add_position_trigger += "<br>回踩20日线附近，若缩量+阳线可加20-30%（总仓位≤150%）"
+                if close is not None and ma50 is not None:
+                    if ma50 * 0.99 <= close <= ma50 * 1.01:
+                        add_position_trigger += "<br>回踩50日线附近，若缩量+阳线可加10-15%（总仓位≤150%）"
             else:
-                add_position_trigger = "跌破MA40，趋势转弱，暂不加仓"
+                add_position_trigger = "未满足加仓条件"
+        else:
+            add_position_trigger = "数据不足"
+    else:
+        add_position_trigger = "周线数据不足"
+    profit_trigger_text = ""
+    if isinstance(item, dict) and weekly_data and isinstance(weekly_data, dict):
+        cost = _as_float(item.get("cost"))
+        weekly_close = weekly_data.get("close")
+        weekly_indicators = weekly_data.get("indicators") if isinstance(weekly_data.get("indicators"), dict) else {}
+        weekly_ma10 = weekly_indicators.get("ma10")
+        weekly_ma20 = weekly_indicators.get("ma20")
+        if cost and weekly_close and weekly_ma10 and weekly_ma20:
+            profit_pct = (weekly_close - cost) / cost * 100
+            above_ma10 = weekly_close > weekly_ma10
+            above_ma20 = weekly_close > weekly_ma20
+            if profit_pct >= 50:
+                profit_trigger_text = f"盈利{profit_pct:.1f}%≥50%，仓位降至30%以下"
+            elif not above_ma20:
+                profit_trigger_text = f"跌破20周线{_format_number(weekly_ma20)}，全清"
+            elif not above_ma10:
+                profit_trigger_text = f"跌破10周线{_format_number(weekly_ma10)}，减半仓"
+            else:
+                profit_trigger_text = f"周线多头排列，盈利{profit_pct:.1f}%，持有"
+        else:
+            profit_trigger_text = "周线数据不足"
+    else:
+        profit_trigger_text = "周线数据不足"
     return (
         "<tr>"
         f"<td>{_html(stock)}</td>"
@@ -2434,7 +2756,7 @@ def _action_matrix_row_html(action: dict[str, str], identity: str, item: Optiona
         f"<td>{technical_status_html}</td>"
         f"<td>{_html(trigger)}</td>"
         f"<td>低于成本15%减30%；低于20%再减30%；低于30%再减40%</td>"
-        f"<td>偏离20周线25-30%以上减1/3；偏离60周线40%以上再减1/3；有效跌破20周线撤退</td>"
+        f"<td>{_html(profit_trigger_text)}</td>"
         f"<td>{_html(add_position_trigger)}</td>"
         f"<td>{_html(action.get('text', '观察等待。'))}</td>"
         "</tr>"
@@ -2445,13 +2767,18 @@ def _action_matrix_html(
     position_actions: list[dict[str, str]],
     positions: list[dict[str, Any]],
     watch_items: list[dict[str, Any]],
+    weekly: Optional[dict[str, Any]] = None,
 ) -> str:
     rows: list[str] = []
     for index, action in enumerate(position_actions):
         item = positions[index] if index < len(positions) else None
-        rows.append(_action_matrix_row_html(action, "持仓", item))
+        code = _code_key(item.get("code")) if isinstance(item, dict) else None
+        weekly_data = weekly.get(code) if weekly and code and isinstance(weekly.get(code), dict) else None
+        rows.append(_action_matrix_row_html(action, "持仓", item, weekly_data))
     for item in watch_items:
-        rows.append(_action_matrix_row_html(_watchlist_web_action(item), "关注池", item))
+        code = _code_key(item.get("code")) if isinstance(item, dict) else None
+        weekly_data = weekly.get(code) if weekly and code and isinstance(weekly.get(code), dict) else None
+        rows.append(_action_matrix_row_html(_watchlist_web_action(item), "关注池", item, weekly_data))
     if not rows:
         rows.append('<tr><td colspan="9" class="empty-cell">暂无需要展示的股票动作。</td></tr>')
     body = (
@@ -2591,8 +2918,8 @@ def _chart_input_summary(item: dict[str, Any], identity: str) -> dict[str, Any]:
         "candle_count": meta.get("candle_count"),
         "has_volume": meta.get("has_volume"),
         "has_ma5": meta.get("has_ma5"),
-        "has_ma20": meta.get("has_ma20"),
-        "has_ma40": meta.get("has_ma40"),
+        "has_ma10": meta.get("has_ma10"),
+        "has_ma30": meta.get("has_ma30"),
         "price_ladder": _price_ladder_summary(item, include_trade_plan_levels=include_trade_plan_levels),
     }
 
@@ -2672,7 +2999,7 @@ def _kpi_cards_html(snapshot: dict[str, Any]) -> str:
 def _condition_items_html(item: dict[str, Any], action: dict[str, str], identity: str) -> str:
     items = [
         ("趋势", _trend_status_text(item)),
-        ("触发", action.get("trigger") or ("MA20/MA40" if identity == "position" else "支撑/压力/均线")),
+        ("触发", action.get("trigger") or ("MA10/MA30" if identity == "position" else "支撑/压力/均线")),
         ("价位", _support_pressure_text(item, include_trade_plan_levels=identity == "position")),
     ]
     if identity == "position":
@@ -2708,11 +3035,12 @@ def _stock_card_html(
     identity: str,
     minimum_odds_ratio: float,
     chart_data_uri: Optional[str] = None,
+    weekly_data: Optional[dict[str, Any]] = None,
 ) -> str:
     code = str(item.get("code") or "").strip()
     label = _stock_label(item)
     identity_label = "持仓" if identity == "position" else "关注"
-    trend_text = _trend_status_text(item)
+    trend_text = _trend_status_text(item, weekly_data)
     level_table = _price_level_table_html(item, include_trade_plan_levels=identity == "position")
     action_text = action.get("text", "观察等待。")
     
@@ -2731,20 +3059,39 @@ def _stock_card_html(
             profit_loss_text = f"止损触发2：当前亏损 {loss_pct:.1f}%，未触发减仓线，继续观察。"
         else:
             profit_pct = (close - cost) / cost * 100
-            profit_loss_text = f"止盈触发：当前盈利 {profit_pct:.1f}%，偏离20周线25-30%以上减1/3；偏离60周线40%以上再减1/3；有效跌破20周线撤退。"
+            if weekly_data and isinstance(weekly_data, dict):
+                weekly_close = weekly_data.get("close")
+                weekly_indicators = weekly_data.get("indicators") if isinstance(weekly_data.get("indicators"), dict) else {}
+                weekly_ma10 = weekly_indicators.get("ma10")
+                weekly_ma20 = weekly_indicators.get("ma20")
+                if weekly_close and weekly_ma10 and weekly_ma20:
+                    above_ma10 = weekly_close > weekly_ma10
+                    above_ma20 = weekly_close > weekly_ma20
+                    if profit_pct >= 50:
+                        profit_loss_text = f"止盈触发：盈利{profit_pct:.1f}%，已达50%+，仓位降至30%以下。"
+                    elif not above_ma20:
+                        profit_loss_text = f"止盈触发：跌破20周线{_format_number(weekly_ma20)}，全清。"
+                    elif not above_ma10:
+                        profit_loss_text = f"止盈触发：跌破10周线{_format_number(weekly_ma10)}，减半仓。"
+                    else:
+                        profit_loss_text = f"止盈触发：盈利{profit_pct:.1f}%，周线多头排列，持有。"
+                else:
+                    profit_loss_text = f"止盈触发：盈利{profit_pct:.1f}%，注意止盈纪律。"
+            else:
+                profit_loss_text = f"止盈触发：盈利{profit_pct:.1f}%，注意止盈纪律。"
     
-    ma20 = _indicator_value(item, "ma20")
-    ma40 = _indicator_value(item, "ma40")
+    ma10 = _indicator_value(item, "ma10")
+    ma30 = _indicator_value(item, "ma30")
     add_position_text = ""
-    if close is not None and ma20 is not None and ma40 is not None:
-        if close >= ma20 and close >= ma40 and ma20 >= ma40:
-            add_position_text = "右侧加仓触发：股价站上MA20/MA40，均线多头排列，可考虑第二仓或第三仓加仓机会。"
-        elif close >= ma20 and close < ma40:
-            add_position_text = "右侧加仓触发：股价站上MA20但未破MA40，属于第一仓建仓或加仓观察区。"
-        elif close < ma20 and close >= ma40:
-            add_position_text = "右侧加仓触发：股价回踩MA20，若缩量止跌可考虑第二仓加仓机会。"
+    if close is not None and ma10 is not None and ma30 is not None:
+        if close >= ma10 and close >= ma30 and ma10 >= ma30:
+            add_position_text = "右侧加仓触发：股价站上MA10/MA30，均线多头排列，可考虑第二仓或第三仓加仓机会。"
+        elif close >= ma10 and close < ma30:
+            add_position_text = "右侧加仓触发：股价站上MA10但未破MA30，属于第一仓建仓或加仓观察区。"
+        elif close < ma10 and close >= ma30:
+            add_position_text = "右侧加仓触发：股价回踩MA10，若缩量止跌可考虑第二仓加仓机会。"
         else:
-            add_position_text = "右侧加仓触发：股价跌破MA40，趋势转弱，暂不加仓。"
+            add_position_text = "右侧加仓触发：股价跌破MA30，趋势转弱，暂不加仓。"
     playbook_text = (
         _position_playbook(item, action)
         if identity == "position"
@@ -2802,7 +3149,7 @@ def _action_table_html(position_actions: list[dict[str, str]], watch_actions: li
             "<td>持仓</td>"
             f"<td>{_html(ACTION_DISPLAY_NAMES.get(action.get('bucket', ''), action.get('bucket', '观察等待')))}</td>"
             f"<td>{_html(action.get('action', '观察'))}</td>"
-            "<td>MA20/MA40</td>"
+            "<td>MA10/MA30</td>"
             "<td>按纪律处理，不加破位仓</td>"
             f"<td>{_html(action.get('text', ''))}</td>"
             "</tr>"
@@ -2981,12 +3328,14 @@ def _render_html_report(snapshot: dict[str, Any]) -> tuple[str, int]:
     for index, item in enumerate(positions):
         action = position_actions[index] if index < len(position_actions) else position_action(item)
         code = _code_key(item.get("code"))
-        position_cards.append(_stock_card_html(item, action, "position", minimum_odds, chart_data_uris.get(("position", code))))
+        weekly_data = snapshot.get("weekly", {}).get(code) if isinstance(snapshot.get("weekly"), dict) else None
+        position_cards.append(_stock_card_html(item, action, "position", minimum_odds, chart_data_uris.get(("position", code)), weekly_data))
     watch_cards = []
     for index, item in enumerate(watchlist):
         action = watch_web_actions[index] if index < len(watch_web_actions) else _watchlist_web_action(item)
         code = _code_key(item.get("code"))
-        watch_cards.append(_stock_card_html(item, action, "watch", minimum_odds, chart_data_uris.get(("watch", code))))
+        weekly_data = snapshot.get("weekly", {}).get(code) if isinstance(snapshot.get("weekly"), dict) else None
+        watch_cards.append(_stock_card_html(item, action, "watch", minimum_odds, chart_data_uris.get(("watch", code)), weekly_data))
 
     position_body = '<div class="stock-grid">' + "".join(position_cards or ["<p>当前没有持仓。</p>"]) + "</div>"
     watch_body = '<div class="stock-grid">' + "".join(watch_cards or ["<p>当前没有非持仓关注股。</p>"]) + "</div>"
@@ -2994,7 +3343,7 @@ def _render_html_report(snapshot: dict[str, Any]) -> tuple[str, int]:
         [
             _today_script_html(snapshot),
             _market_thermometer_html(snapshot),
-            _action_matrix_html(position_actions, positions, watchlist),
+            _action_matrix_html(position_actions, positions, watchlist, snapshot.get("weekly")),
             _collapsible_section_html(
                 section_id="positions",
                 title="持仓诊断",
