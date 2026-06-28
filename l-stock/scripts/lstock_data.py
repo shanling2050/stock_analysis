@@ -1345,11 +1345,22 @@ def collect_stock_group(workspace: Path, offline: bool, state: Optional[dict[str
     if state.get("status") == "BLOCK":
         return blocked_group("state_unavailable", state.get("missing", ["positions", "watchlist"]), [])
 
-    codes = _collect_codes(state.get("positions", []) + state.get("watchlist", []))
+    all_stocks = state.get("positions", []) + state.get("watchlist", [])
+    codes = _collect_codes(all_stocks)
     if not codes:
         return pass_group({"items": []})
     if offline:
         return blocked_group("offline_mode", codes, [])
+
+    stock_info: dict[str, dict[str, str]] = {}
+    for stock in all_stocks:
+        if isinstance(stock, dict):
+            code = stock.get("code", "")
+            if code:
+                stock_info[code] = {
+                    "name": stock.get("name", ""),
+                    "market": stock.get("market", ""),
+                }
 
     items: list[dict[str, Any]] = []
     missing: list[str] = []
@@ -1367,6 +1378,12 @@ def collect_stock_group(workspace: Path, offline: bool, state: Optional[dict[str
         else:
             if not isinstance(item, dict) or item.get("status") == "BLOCK":
                 missing.append(code)
+        if isinstance(item, dict):
+            info = stock_info.get(code, {})
+            if info.get("name"):
+                item["name"] = info["name"]
+            if info.get("market"):
+                item["market"] = info["market"]
         items.append(item)
 
     if missing:

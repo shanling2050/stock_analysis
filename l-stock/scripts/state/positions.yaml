@@ -12,6 +12,7 @@
     {"code": "159781", "name": "科创创业", "market": "sz", "quantity": 7800, "cost": 1.269},
     {"code": "515880", "name": "通信ETF", "market": "sh", "quantity": 35500, "cost": 1.502},
     {"code": "513880", "name": "日经ETF", "market": "sh", "quantity": 64700, "cost": 2.516},
-    {"code": "159509", "name": "纳指科技", "market": "sz", "quantity": 5300, "cost": 2.760}
+    {"code": "159509", "name": "纳指科技", "market": "sz", "quantity": 5300, "cost": 2.760},
+    {"code": "03441", "name": "南方东西精选ETF", "market": "hk", "quantity": 40400, "cost": 10.457}
   ]
 }
