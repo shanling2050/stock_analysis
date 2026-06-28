@@ -54,6 +54,31 @@
       "code": "601225",
       "name": "陕西煤业",
       "market": "sh"
+    },
+    {
+      "code": "00700",
+      "name": "腾讯控股",
+      "market": "hk"
+    },
+    {
+      "code": "09992",
+      "name": "泡泡玛特",
+      "market": "hk"
+    },
+    {
+      "code": "06181",
+      "name": "老铺黄金",
+      "market": "hk"
+    },
+    {
+      "code": "02259",
+      "name": "紫金黄金国际",
+      "market": "hk"
+    },
+    {
+      "code": "00883",
+      "name": "中国海洋石油",
+      "market": "hk"
     }
   ]
 }

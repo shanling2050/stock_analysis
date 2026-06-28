@@ -334,14 +334,16 @@ def _tencent_symbol(code: str) -> str:
 
 def _is_hk_code(code: str) -> bool:
     normalized = str(code).strip()
-    if len(normalized) == 5 and normalized.startswith("00"):
+    # 港股代码通常是5位数字
+    if len(normalized) == 5 and normalized.isdigit():
         return True
+    # 或者是6位数字且以00开头的港股通代码
     if len(normalized) == 6 and normalized.startswith("00"):
         return normalized in KNOWN_HK_STOCK_CONNECT_CODES
     return False
 
 
-KNOWN_HK_CODES = {"00700", "09988", "09999", "09698", "06198", "06098", "06998", "06888", "02382", "02196", "01179", "01359", "01579", "06969"}
+KNOWN_HK_CODES = {"00700", "09988", "09999", "09698", "06198", "06098", "06998", "06888", "02382", "02196", "01179", "01359", "01579", "06969", "09992", "06181", "02259", "00883"}
 
 KNOWN_HK_STOCK_CONNECT_CODES = {"003441", "001888", "00169", "03333", "06699", "06837", "06030", "06198", "06969", "09698"}
 

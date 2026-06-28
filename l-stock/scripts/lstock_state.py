@@ -17,7 +17,7 @@ REQUIRED_STATE_FILES = [
     "preferences.yaml",
     "history.yaml",
 ]
-CODE_RE = re.compile(r"^\d{6}$")
+CODE_RE = re.compile(r"^\d{5,6}$")
 
 
 def load_json_yaml(path: Path) -> dict[str, Any]:
